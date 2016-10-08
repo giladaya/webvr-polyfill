@@ -416,17 +416,27 @@ VRDisplay.prototype.addFullscreenListeners_ = function(element, changeHandler, e
   this.fullscreenErrorHandler_ = errorHandler;
 
   if (changeHandler) {
-    element.addEventListener('fullscreenchange', changeHandler, false);
-    element.addEventListener('webkitfullscreenchange', changeHandler, false);
-    document.addEventListener('mozfullscreenchange', changeHandler, false);
-    element.addEventListener('msfullscreenchange', changeHandler, false);
+    if (document.fullscreenEnabled) {
+      element.addEventListener('fullscreenchange', changeHandler, false);
+    } else if (document.webkitFullscreenEnabled) {
+      element.addEventListener('webkitfullscreenchange', changeHandler, false);
+    } else if (document.mozFullScreenEnabled) {
+      document.addEventListener('mozfullscreenchange', changeHandler, false);
+    } else if (document.msFullscreenEnabled) {
+      element.addEventListener('msfullscreenchange', changeHandler, false);
+    }
   }
 
   if (errorHandler) {
-    element.addEventListener('fullscreenerror', errorHandler, false);
-    element.addEventListener('webkitfullscreenerror', errorHandler, false);
-    document.addEventListener('mozfullscreenerror', errorHandler, false);
-    element.addEventListener('msfullscreenerror', errorHandler, false);
+    if (document.fullscreenEnabled) {
+      element.addEventListener('fullscreenerror', errorHandler, false);
+    } else if (document.webkitFullscreenEnabled) {
+      element.addEventListener('webkitfullscreenerror', errorHandler, false);
+    } else if (document.mozFullScreenEnabled) {
+      document.addEventListener('mozfullscreenerror', errorHandler, false);
+    } else if (document.msFullscreenEnabled) {
+      element.addEventListener('msfullscreenerror', errorHandler, false);
+    }
   }
 };
 
@@ -4539,6 +4549,9 @@ function ComplementaryFilter(kFilter) {
   this.currentAccelMeasurement = new SensorSample();
   this.currentGyroMeasurement = new SensorSample();
   this.previousGyroMeasurement = new SensorSample();
+  this.currentOrientationMeasurement = new SensorSample();
+  this.compassDelta = 0;
+  this.isCompassDeltaInit = false;
 
   // Set default look direction to be in the correct direction.
   if (Util.isIOS()) {
@@ -4575,6 +4588,10 @@ ComplementaryFilter.prototype.addGyroMeasurement = function(vector, timestampS) 
   }
 
   this.previousGyroMeasurement.copy(this.currentGyroMeasurement);
+};
+
+ComplementaryFilter.prototype.addOrientationAbsMeasurement = function(euler, timestampS) {
+  this.currentOrientationMeasurement.set(euler, timestampS);
 };
 
 ComplementaryFilter.prototype.run_ = function() {
@@ -4635,6 +4652,26 @@ ComplementaryFilter.prototype.run_ = function() {
 
   // SLERP factor: 0 is pure gyro, 1 is pure accel.
   this.filterQ.slerp(targetQ, 1 - this.kFilter);
+
+  //correct yaw
+  if (this.currentOrientationMeasurement.sample &&
+      this.currentOrientationMeasurement.sample.alpha !== null) {
+    var compassE = new THREE.Euler(
+      this.currentOrientationMeasurement.sample.beta,
+      this.currentOrientationMeasurement.sample.gamma,
+      this.currentOrientationMeasurement.sample.alpha,
+      //'ZYX'
+      'ZXY'
+    );
+    // var compassQ = new MathUtil.Quaternion();
+    // compassQ.set(0, 0, 0, 1);
+    // compassQ.setFromAxisAngle(new MathUtil.Vector3(0, 0, 1), this.currentOrientationMeasurement.sample.alpha);
+
+    var compassQ = new THREE.Quaternion();
+    compassQ.setFromEuler(compassE);
+    this.filterQ.slerp(compassQ, 1 - this.kFilter);  
+    //this.filterQ.copy(compassQ);
+  }
 
   this.previousFilterQ.copy(this.filterQ);
 };
@@ -4697,8 +4734,18 @@ function FusionPoseSensor() {
   this.accelerometer = new MathUtil.Vector3();
   this.gyroscope = new MathUtil.Vector3();
 
+  //--------------------
+  this.baseDeltaDeg = 0;
+  this.skips = 2;
+  this.baseDeltaIsInit = false;
+  //--------------------
+
   window.addEventListener('devicemotion', this.onDeviceMotionChange_.bind(this));
   window.addEventListener('orientationchange', this.onScreenOrientationChange_.bind(this));
+  if ('ondeviceorientationabsolute' in window) {
+    window.addEventListener('deviceorientationabsolute', this.onDeviceOrientationAbsChange_.bind(this), false);
+  }
+
 
   this.filter = new ComplementaryFilter(WebVRConfig.K_FILTER);
   this.posePredictor = new PosePredictor(WebVRConfig.PREDICTION_TIME_S);
@@ -4792,6 +4839,25 @@ FusionPoseSensor.prototype.resetPose = function() {
     this.touchPanner.resetSensor();
   }
 };
+
+FusionPoseSensor.prototype.onDeviceOrientationAbsChange_ = function(deviceOrientation) {
+  if (this.skips > 0){
+    this.skips--;
+  } else {
+    if (!this.baseDeltaIsInit) {
+      this.baseDeltaDeg = deviceOrientation.alpha;
+      this.baseDeltaIsInit = true;
+      console.log('Setting base delta to '+ this.baseDeltaDeg);
+    } else {
+      var timestampS = Date.now() / 1000;
+      this.filter.addOrientationAbsMeasurement({
+        alpha: (deviceOrientation.alpha - this.baseDeltaDeg) * Math.PI / 180,
+        beta: deviceOrientation.beta * Math.PI / 180,
+        gamma: deviceOrientation.gamma * Math.PI / 180,
+      }, timestampS);
+    }
+  }
+}
 
 FusionPoseSensor.prototype.onDeviceMotionChange_ = function(deviceMotion) {
   var accGravity = deviceMotion.accelerationIncludingGravity;

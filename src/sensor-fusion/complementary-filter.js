@@ -40,6 +40,9 @@ function ComplementaryFilter(kFilter) {
   this.currentAccelMeasurement = new SensorSample();
   this.currentGyroMeasurement = new SensorSample();
   this.previousGyroMeasurement = new SensorSample();
+  this.currentOrientationMeasurement = new SensorSample();
+  this.compassDelta = 0;
+  this.isCompassDeltaInit = false;
 
   // Set default look direction to be in the correct direction.
   if (Util.isIOS()) {
@@ -76,6 +79,10 @@ ComplementaryFilter.prototype.addGyroMeasurement = function(vector, timestampS) 
   }
 
   this.previousGyroMeasurement.copy(this.currentGyroMeasurement);
+};
+
+ComplementaryFilter.prototype.addOrientationAbsMeasurement = function(euler, timestampS) {
+  this.currentOrientationMeasurement.set(euler, timestampS);
 };
 
 ComplementaryFilter.prototype.run_ = function() {
@@ -136,6 +143,26 @@ ComplementaryFilter.prototype.run_ = function() {
 
   // SLERP factor: 0 is pure gyro, 1 is pure accel.
   this.filterQ.slerp(targetQ, 1 - this.kFilter);
+
+  //correct yaw
+  if (this.currentOrientationMeasurement.sample &&
+      this.currentOrientationMeasurement.sample.alpha !== null) {
+    var compassE = new THREE.Euler(
+      this.currentOrientationMeasurement.sample.beta,
+      this.currentOrientationMeasurement.sample.gamma,
+      this.currentOrientationMeasurement.sample.alpha,
+      //'ZYX'
+      'ZXY'
+    );
+    // var compassQ = new MathUtil.Quaternion();
+    // compassQ.set(0, 0, 0, 1);
+    // compassQ.setFromAxisAngle(new MathUtil.Vector3(0, 0, 1), this.currentOrientationMeasurement.sample.alpha);
+
+    var compassQ = new THREE.Quaternion();
+    compassQ.setFromEuler(compassE);
+    this.filterQ.slerp(compassQ, 1 - this.kFilter);  
+    //this.filterQ.copy(compassQ);
+  }
 
   this.previousFilterQ.copy(this.filterQ);
 };

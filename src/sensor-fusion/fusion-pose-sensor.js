@@ -28,8 +28,18 @@ function FusionPoseSensor() {
   this.accelerometer = new MathUtil.Vector3();
   this.gyroscope = new MathUtil.Vector3();
 
+  //--------------------
+  this.baseDeltaDeg = 0;
+  this.skips = 2;
+  this.baseDeltaIsInit = false;
+  //--------------------
+
   window.addEventListener('devicemotion', this.onDeviceMotionChange_.bind(this));
   window.addEventListener('orientationchange', this.onScreenOrientationChange_.bind(this));
+  if ('ondeviceorientationabsolute' in window) {
+    window.addEventListener('deviceorientationabsolute', this.onDeviceOrientationAbsChange_.bind(this), false);
+  }
+
 
   this.filter = new ComplementaryFilter(WebVRConfig.K_FILTER);
   this.posePredictor = new PosePredictor(WebVRConfig.PREDICTION_TIME_S);
@@ -123,6 +133,25 @@ FusionPoseSensor.prototype.resetPose = function() {
     this.touchPanner.resetSensor();
   }
 };
+
+FusionPoseSensor.prototype.onDeviceOrientationAbsChange_ = function(deviceOrientation) {
+  if (this.skips > 0){
+    this.skips--;
+  } else {
+    if (!this.baseDeltaIsInit) {
+      this.baseDeltaDeg = deviceOrientation.alpha;
+      this.baseDeltaIsInit = true;
+      console.log('Setting base delta to '+ this.baseDeltaDeg);
+    } else {
+      var timestampS = Date.now() / 1000;
+      this.filter.addOrientationAbsMeasurement({
+        alpha: (deviceOrientation.alpha - this.baseDeltaDeg) * Math.PI / 180,
+        beta: deviceOrientation.beta * Math.PI / 180,
+        gamma: deviceOrientation.gamma * Math.PI / 180,
+      }, timestampS);
+    }
+  }
+}
 
 FusionPoseSensor.prototype.onDeviceMotionChange_ = function(deviceMotion) {
   var accGravity = deviceMotion.accelerationIncludingGravity;
