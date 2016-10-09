@@ -81,8 +81,8 @@ ComplementaryFilter.prototype.addGyroMeasurement = function(vector, timestampS) 
   this.previousGyroMeasurement.copy(this.currentGyroMeasurement);
 };
 
-ComplementaryFilter.prototype.addOrientationAbsMeasurement = function(euler, timestampS) {
-  this.currentOrientationMeasurement.set(euler, timestampS);
+ComplementaryFilter.prototype.addOrientationAbsMeasurement = function(eulerV, timestampS) {
+  this.currentOrientationMeasurement.set(eulerV, timestampS);
 };
 
 ComplementaryFilter.prototype.run_ = function() {
@@ -147,21 +147,22 @@ ComplementaryFilter.prototype.run_ = function() {
   //correct yaw
   if (this.currentOrientationMeasurement.sample &&
       this.currentOrientationMeasurement.sample.alpha !== null) {
-    var compassE = new THREE.Euler(
+    // var compassE = new THREE.Euler(
+    //   this.currentOrientationMeasurement.sample.beta,
+    //   this.currentOrientationMeasurement.sample.gamma,
+    //   this.currentOrientationMeasurement.sample.alpha,
+    //   'ZXY'
+    // );
+    // var compassQ = new THREE.Quaternion();
+    // compassQ.setFromEuler(compassE);
+
+    var compassQ = new MathUtil.Quaternion();
+    compassQ.setFromEulerZXY(
       this.currentOrientationMeasurement.sample.beta,
       this.currentOrientationMeasurement.sample.gamma,
-      this.currentOrientationMeasurement.sample.alpha,
-      //'ZYX'
-      'ZXY'
-    );
-    // var compassQ = new MathUtil.Quaternion();
-    // compassQ.set(0, 0, 0, 1);
-    // compassQ.setFromAxisAngle(new MathUtil.Vector3(0, 0, 1), this.currentOrientationMeasurement.sample.alpha);
-
-    var compassQ = new THREE.Quaternion();
-    compassQ.setFromEuler(compassE);
+      this.currentOrientationMeasurement.sample.alpha);
+    
     this.filterQ.slerp(compassQ, 1 - this.kFilter);  
-    //this.filterQ.copy(compassQ);
   }
 
   this.previousFilterQ.copy(this.filterQ);

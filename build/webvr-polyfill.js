@@ -4028,6 +4028,22 @@ MathUtil.Quaternion.prototype = {
     return this;
   },
 
+  setFromEulerZXY: function( x, y, z ) {
+    var c1 = Math.cos( x / 2 );
+    var c2 = Math.cos( y / 2 );
+    var c3 = Math.cos( z / 2 );
+    var s1 = Math.sin( x / 2 );
+    var s2 = Math.sin( y / 2 );
+    var s3 = Math.sin( z / 2 );
+
+    this.x = s1 * c2 * c3 - c1 * s2 * s3;
+    this.y = c1 * s2 * c3 + s1 * c2 * s3;
+    this.z = c1 * c2 * s3 + s1 * s2 * c3;
+    this.w = c1 * c2 * c3 - s1 * s2 * s3;
+
+    return this;
+  },
+
   setFromAxisAngle: function ( axis, angle ) {
     // http://www.euclideanspace.com/maths/geometry/rotations/conversions/angleToQuaternion/index.htm
     // assumes axis is normalized
@@ -4590,8 +4606,8 @@ ComplementaryFilter.prototype.addGyroMeasurement = function(vector, timestampS) 
   this.previousGyroMeasurement.copy(this.currentGyroMeasurement);
 };
 
-ComplementaryFilter.prototype.addOrientationAbsMeasurement = function(euler, timestampS) {
-  this.currentOrientationMeasurement.set(euler, timestampS);
+ComplementaryFilter.prototype.addOrientationAbsMeasurement = function(eulerV, timestampS) {
+  this.currentOrientationMeasurement.set(eulerV, timestampS);
 };
 
 ComplementaryFilter.prototype.run_ = function() {
@@ -4656,21 +4672,22 @@ ComplementaryFilter.prototype.run_ = function() {
   //correct yaw
   if (this.currentOrientationMeasurement.sample &&
       this.currentOrientationMeasurement.sample.alpha !== null) {
-    var compassE = new THREE.Euler(
+    // var compassE = new THREE.Euler(
+    //   this.currentOrientationMeasurement.sample.beta,
+    //   this.currentOrientationMeasurement.sample.gamma,
+    //   this.currentOrientationMeasurement.sample.alpha,
+    //   'ZXY'
+    // );
+    // var compassQ = new THREE.Quaternion();
+    // compassQ.setFromEuler(compassE);
+
+    var compassQ = new MathUtil.Quaternion();
+    compassQ.setFromEulerZXY(
       this.currentOrientationMeasurement.sample.beta,
       this.currentOrientationMeasurement.sample.gamma,
-      this.currentOrientationMeasurement.sample.alpha,
-      //'ZYX'
-      'ZXY'
-    );
-    // var compassQ = new MathUtil.Quaternion();
-    // compassQ.set(0, 0, 0, 1);
-    // compassQ.setFromAxisAngle(new MathUtil.Vector3(0, 0, 1), this.currentOrientationMeasurement.sample.alpha);
-
-    var compassQ = new THREE.Quaternion();
-    compassQ.setFromEuler(compassE);
+      this.currentOrientationMeasurement.sample.alpha);
+    
     this.filterQ.slerp(compassQ, 1 - this.kFilter);  
-    //this.filterQ.copy(compassQ);
   }
 
   this.previousFilterQ.copy(this.filterQ);
