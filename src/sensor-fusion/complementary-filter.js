@@ -32,8 +32,18 @@ var DEBUG = false;
  * 2. Get orientation estimates from gyroscope by integrating over time.
  * 3. Combine the two estimates, weighing (1) in the long term, but (2) for the
  *    short term.
+ *
+ *
+ * An additional anti yaw drift measure is applied using the magnetometer
+ * which gives us an absolute yaw reference but is very laggy
+ * 
+ * This fusion is relatively simple:
+ * 1. Calculate the delta between the estimated yaw (gyro based) and the true yaw (compass based)
+ * 2. Correct the estimated yaw with the true yaw. 
+ *    The correction amount adapts to the radial velocity of the user to avoid the user noticing the correction
+ *
  */
-function ComplementaryFilter(kFilter) {
+function ComplementaryFilter(kFilter, compassKFilter) {
   this.kFilter = kFilter;
 
   // Raw sensor measurements.
@@ -41,8 +51,13 @@ function ComplementaryFilter(kFilter) {
   this.currentGyroMeasurement = new SensorSample();
   this.previousGyroMeasurement = new SensorSample();
   this.currentOrientationMeasurement = new SensorSample();
-  this.compassDelta = 0;
-  this.isCompassDeltaInit = false;
+
+  this.minRv = 0.5;  //minimal radial velocity to apply compass fusion
+  this.maxRv = 15; //radial velocity to apply maximal compass fusion
+  // compass compensation factor.
+  // lower values give better accuracy but higher chance that the user will feel the correction
+  compassKFilter = (typeof compassKFilter !== 'undefined') ?  compassKFilter : 0.7;
+  this.maxFactor = (1-compassKFilter);
 
   // Set default look direction to be in the correct direction.
   if (Util.isIOS()) {
@@ -105,6 +120,7 @@ ComplementaryFilter.prototype.run_ = function() {
   this.filterQ.copy(this.previousFilterQ);
   this.filterQ.multiply(gyroDeltaQ);
 
+
   // Calculate the delta between the current estimated gravity and the real
   // gravity vector from accelerometer.
   var invFilterQ = new MathUtil.Quaternion();
@@ -144,29 +160,79 @@ ComplementaryFilter.prototype.run_ = function() {
   // SLERP factor: 0 is pure gyro, 1 is pure accel.
   this.filterQ.slerp(targetQ, 1 - this.kFilter);
 
-  //correct yaw
   if (this.currentOrientationMeasurement.sample &&
       this.currentOrientationMeasurement.sample.alpha !== null) {
-    // var compassE = new THREE.Euler(
-    //   this.currentOrientationMeasurement.sample.beta,
-    //   this.currentOrientationMeasurement.sample.gamma,
-    //   this.currentOrientationMeasurement.sample.alpha,
-    //   'ZXY'
-    // );
-    // var compassQ = new THREE.Quaternion();
-    // compassQ.setFromEuler(compassE);
 
     var compassQ = new MathUtil.Quaternion();
     compassQ.setFromEulerZXY(
       this.currentOrientationMeasurement.sample.beta,
       this.currentOrientationMeasurement.sample.gamma,
       this.currentOrientationMeasurement.sample.alpha);
-    
-    this.filterQ.slerp(compassQ, 1 - this.kFilter);  
-  }
+
+    if (false) {
+      //simple, non-adaptive fusion
+      this.filterQ.slerp(compassQ, 1 - this.kFilter);  
+    } else {
+      //adaptive fusion
+
+      //calculate earth yaw delta quaternion
+      //there's probably a better way of doing this, but this one works...
+      var estimatedNorth = new MathUtil.Vector3();
+      estimatedNorth.set(0, 1, 0);
+      estimatedNorth.applyQuaternion(invFilterQ);
+      estimatedNorth.normalize();
+
+      var invCompassQ = new MathUtil.Quaternion();
+      invCompassQ.copy(compassQ);
+      invCompassQ.inverse();
+
+      var measuredNorth = new MathUtil.Vector3();
+      measuredNorth.set(0, 1, 0);
+      measuredNorth.applyQuaternion(invCompassQ);
+      measuredNorth.normalize();
+
+      // Compare estimated compass with measured compass, get the delta quaternion
+      // between the two.
+      deltaQ = new MathUtil.Quaternion();
+      deltaQ.setFromUnitVectors(estimatedNorth, measuredNorth);
+      deltaQ.inverse();
+
+      targetQ = new MathUtil.Quaternion();
+      targetQ.copy(this.filterQ);
+      targetQ.multiply(deltaQ);
+
+      //earth frame radial velocity from gyro
+      var earthGyro = new MathUtil.Vector3();
+      earthGyro.copy(this.currentGyroMeasurement.sample);
+      earthGyro.applyQuaternion(this.filterQ);
+
+      //calculate adaptive factor, relative to user's yaw velocity
+      var kFactor = scaleClamp(this.minRv, this.maxRv, 0, this.maxFactor, Math.abs(earthGyro.z));
+
+      //adaptive factor, relative to user's combined radial velocity
+      // var kFactor = scale(this.minRv, this.maxRv, 0, this.maxFactor, this.currentGyroMeasurement.sample.length());
+
+      this.filterQ.slerp(targetQ, kFactor);
+    }
+  }  
 
   this.previousFilterQ.copy(this.filterQ);
 };
+
+/**
+ * Scale a value from range to range + clamp
+ * @param sMin min val of source range
+ * @param sMax max val of source range
+ * @param tMin min val of target range
+ * @param tMax max val of target range
+ * @param val value to map
+ */
+function scaleClamp(sMin, sMax, tMin, tMax, val){
+  //map
+  var mapped = (val-sMin)/(sMax-sMin) * (tMax-tMin) + tMin;
+  //clamp
+  return Math.max(tMin, Math.min(mapped, tMax));
+}
 
 ComplementaryFilter.prototype.getOrientation = function() {
   return this.filterQ;
