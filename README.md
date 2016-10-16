@@ -52,6 +52,12 @@ WebVRConfig = {
   // Complementary filter coefficient. 0 for accelerometer, 1 for gyro.
   K_FILTER: 0.98, // Default: 0.98.
 
+  // Compass complementary filter coefficient. 0 for compass, 1 for gyro.
+  // The actual coefficient value used is adaptive in correlation to user head movement, 
+  // so this value determines the maximal possible coefficient value.
+  // Lower values give better accuracy but higher chance that the user will notice the correction.
+  K_FILTER_COMPASS: 0.7,
+
   // Flag to disable the instructions to rotate your device.
   ROTATE_INSTRUCTIONS_DISABLED: false, // Default: false.
 
