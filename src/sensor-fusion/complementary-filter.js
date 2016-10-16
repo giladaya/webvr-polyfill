@@ -52,12 +52,12 @@ function ComplementaryFilter(kFilter, compassKFilter) {
   this.previousGyroMeasurement = new SensorSample();
   this.currentOrientationMeasurement = new SensorSample();
 
-  this.minRv = 0.5;  //minimal radial velocity to apply compass fusion
-  this.maxRv = 15; //radial velocity to apply maximal compass fusion
+  this.minRv = 0.2;  //minimal radial velocity for applying any compass fusion
+  this.maxRv = 15;   //radial velocity to apply maximal compass fusion
   // compass compensation factor.
   // lower values give better accuracy but higher chance that the user will feel the correction
   compassKFilter = (typeof compassKFilter !== 'undefined') ?  compassKFilter : 0.7;
-  this.maxFactor = (1-compassKFilter);
+  this.maxCompassFactor = (1-compassKFilter);
 
   // Set default look direction to be in the correct direction.
   if (Util.isIOS()) {
@@ -160,7 +160,8 @@ ComplementaryFilter.prototype.run_ = function() {
   // SLERP factor: 0 is pure gyro, 1 is pure accel.
   this.filterQ.slerp(targetQ, 1 - this.kFilter);
 
-  if (this.currentOrientationMeasurement.sample &&
+  if (this.maxCompassFactor > 0 && 
+      this.currentOrientationMeasurement.sample &&
       this.currentOrientationMeasurement.sample.alpha !== null) {
 
     var compassQ = new MathUtil.Quaternion();
@@ -169,51 +170,43 @@ ComplementaryFilter.prototype.run_ = function() {
       this.currentOrientationMeasurement.sample.gamma,
       this.currentOrientationMeasurement.sample.alpha);
 
-    if (false) {
-      //simple, non-adaptive fusion
-      this.filterQ.slerp(compassQ, 1 - this.kFilter);  
-    } else {
-      //adaptive fusion
+    //adaptive fusion
 
-      //calculate earth yaw delta quaternion
-      //there's probably a better way of doing this, but this one works...
-      var estimatedNorth = new MathUtil.Vector3();
-      estimatedNorth.set(0, 1, 0);
-      estimatedNorth.applyQuaternion(invFilterQ);
-      estimatedNorth.normalize();
+    //calculate earth yaw delta quaternion
+    //there's probably a better way of doing this, but this one works...
+    var estimatedNorth = new MathUtil.Vector3();
+    estimatedNorth.set(0, 1, 0);
+    estimatedNorth.applyQuaternion(invFilterQ);
+    estimatedNorth.normalize();
 
-      var invCompassQ = new MathUtil.Quaternion();
-      invCompassQ.copy(compassQ);
-      invCompassQ.inverse();
+    var invCompassQ = new MathUtil.Quaternion();
+    invCompassQ.copy(compassQ);
+    invCompassQ.inverse();
 
-      var measuredNorth = new MathUtil.Vector3();
-      measuredNorth.set(0, 1, 0);
-      measuredNorth.applyQuaternion(invCompassQ);
-      measuredNorth.normalize();
+    var measuredNorth = new MathUtil.Vector3();
+    measuredNorth.set(0, 1, 0);
+    measuredNorth.applyQuaternion(invCompassQ);
+    measuredNorth.normalize();
 
-      // Compare estimated compass with measured compass, get the delta quaternion
-      // between the two.
-      deltaQ = new MathUtil.Quaternion();
-      deltaQ.setFromUnitVectors(estimatedNorth, measuredNorth);
-      deltaQ.inverse();
+    // Compare estimated compass with measured compass, get the delta quaternion
+    // between the two.
+    deltaQ = new MathUtil.Quaternion();
+    deltaQ.setFromUnitVectors(estimatedNorth, measuredNorth);
+    deltaQ.inverse();
 
-      targetQ = new MathUtil.Quaternion();
-      targetQ.copy(this.filterQ);
-      targetQ.multiply(deltaQ);
+    targetQ = new MathUtil.Quaternion();
+    targetQ.copy(this.filterQ);
+    targetQ.multiply(deltaQ);
 
-      //earth frame radial velocity from gyro
-      var earthGyro = new MathUtil.Vector3();
-      earthGyro.copy(this.currentGyroMeasurement.sample);
-      earthGyro.applyQuaternion(this.filterQ);
+    //earth frame radial velocity from gyro
+    var earthGyro = new MathUtil.Vector3();
+    earthGyro.copy(this.currentGyroMeasurement.sample);
+    earthGyro.applyQuaternion(this.filterQ);
 
-      //calculate adaptive factor, relative to user's yaw velocity
-      var kFactor = scaleClamp(this.minRv, this.maxRv, 0, this.maxFactor, Math.abs(earthGyro.z));
+    //calculate adaptive factor, relative to user's yaw velocity
+    var kFactor = scaleClamp(this.minRv, this.maxRv, 0, this.maxCompassFactor, Math.abs(earthGyro.z));
 
-      //adaptive factor, relative to user's combined radial velocity
-      // var kFactor = scale(this.minRv, this.maxRv, 0, this.maxFactor, this.currentGyroMeasurement.sample.length());
-
-      this.filterQ.slerp(targetQ, kFactor);
-    }
+    this.filterQ.slerp(targetQ, kFactor);
   }  
 
   this.previousFilterQ.copy(this.filterQ);

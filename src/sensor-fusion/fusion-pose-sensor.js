@@ -41,7 +41,7 @@ function FusionPoseSensor() {
   }
 
 
-  this.filter = new ComplementaryFilter(WebVRConfig.K_FILTER);
+  this.filter = new ComplementaryFilter(WebVRConfig.K_FILTER, WebVRConfig.K_FILTER_COMPASS);
   this.posePredictor = new PosePredictor(WebVRConfig.PREDICTION_TIME_S);
   this.touchPanner = new TouchPanner();
 
